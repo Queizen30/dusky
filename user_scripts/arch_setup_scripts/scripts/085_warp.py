@@ -35,8 +35,8 @@ except ImportError:
 
 # ─── Version Guard ───────────────────────────────────────────────────────
 
-if sys.version_info < (3, 14):
-    sys.stderr.write("This script requires Python 3.14 or later.\n")
+if sys.version_info < (3, 12):
+    sys.stderr.write("This script requires Python 3.12 or later.\n")
     sys.exit(1)
 
 # ─── Constants ───────────────────────────────────────────────────────────
