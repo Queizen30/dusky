@@ -12,6 +12,11 @@ SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 readonly SCRIPT_DIR
 readonly ORCHESTRATOR_PY="${SCRIPT_DIR}/orchestrator.py"
 readonly NETWORK_SCRIPT="${SCRIPT_DIR}/scripts/003_network_connect.sh"
+readonly MIN_PYTHON_MAJOR=3
+readonly MIN_PYTHON_MINOR=12
+
+declare -g PKG_MANAGER=""
+declare -ag sudo_cmd=()
 
 declare -g RED="" GREEN="" YELLOW="" BLUE="" BOLD="" RESET=""
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
@@ -45,7 +50,12 @@ wrapper_error() {
 trap 'wrapper_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
 bootstrap_packages() {
-    local line
+    local line manager="${1:-$PKG_MANAGER}"
+    if [[ "$manager" == "apt" ]]; then
+        printf '%s\n' python3 python3-pip git
+        return 0
+    fi
+
     if [[ -f "$ORCHESTRATOR_PY" ]] && line="$(grep -m1 '^# DUSKY_BOOTSTRAP_PACKAGES:' "$ORCHESTRATOR_PY" 2>/dev/null)"; then
         local -a pkgs=()
         read -r -a pkgs <<< "${line#*:}"
@@ -57,9 +67,23 @@ bootstrap_packages() {
     printf '%s\n' python python-textual python-rich git
 }
 
+detect_package_manager() {
+    if command -v pacman >/dev/null 2>&1; then
+        PKG_MANAGER="pacman"
+        return 0
+    fi
+    if command -v apt-get >/dev/null 2>&1; then
+        PKG_MANAGER="apt"
+        return 0
+    fi
+
+    log ERROR "No supported package manager found (expected pacman or apt-get)."
+    exit 1
+}
+
 check_internet() {
     local url
-    local -a urls=("https://archlinux.org" "https://geo.mirror.pkgbuild.com")
+    local -a urls=("https://archlinux.org" "https://geo.mirror.pkgbuild.com" "https://ubuntu.com")
     if command -v curl >/dev/null 2>&1; then
         for url in "${urls[@]}"; do
             if curl -fsS --connect-timeout 2 --max-time 3 "$url" >/dev/null 2>&1; then
@@ -117,7 +141,7 @@ require_internet() {
 }
 
 python_ok() {
-    "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 14, 7) else 1)' >/dev/null 2>&1
+    "$1" -c "import sys; sys.exit(0 if sys.version_info >= (${MIN_PYTHON_MAJOR}, ${MIN_PYTHON_MINOR}) else 1)" >/dev/null 2>&1
 }
 
 choose_python() {
@@ -138,7 +162,53 @@ choose_python() {
 }
 
 pkg_installed() {
-    pacman -Qq "$1" >/dev/null 2>&1
+    local pkg="$1"
+    case "$PKG_MANAGER" in
+        pacman) pacman -Qq "$pkg" >/dev/null 2>&1 ;;
+        apt) dpkg-query -W -f='${Status}\n' "$pkg" 2>/dev/null | grep -q "install ok installed" ;;
+        *) return 1 ;;
+    esac
+}
+
+install_missing_packages() {
+    local -a pkgs=("$@")
+    case "$PKG_MANAGER" in
+        pacman)
+            if [[ -e /var/lib/pacman/db.lck ]]; then
+                log ERROR "Pacman lock exists at /var/lib/pacman/db.lck. Resolve it before retrying."
+                exit 1
+            fi
+            "${sudo_cmd[@]}" pacman -Syu --needed --noconfirm "${pkgs[@]}"
+            ;;
+        apt)
+            log RUN "Refreshing apt package index..."
+            "${sudo_cmd[@]}" apt-get update
+            "${sudo_cmd[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y "${pkgs[@]}"
+            ;;
+        *)
+            log ERROR "Unsupported package manager: $PKG_MANAGER"
+            exit 1
+            ;;
+    esac
+}
+
+install_python_runtime_deps() {
+    local python_bin="$1"
+    case "$PKG_MANAGER" in
+        pacman)
+            "${sudo_cmd[@]}" pacman -Syu --noconfirm python-textual python-rich
+            ;;
+        apt)
+            "${sudo_cmd[@]}" apt-get update
+            "${sudo_cmd[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install -y python3-rich python3-pip
+            local -a pip_cmd=("$python_bin" -m pip install --user --upgrade rich "textual>=8.2.8")
+            if (( EUID == 0 )) && [[ -n "${SUDO_USER:-}" ]]; then
+                sudo -u "$SUDO_USER" -- "${pip_cmd[@]}"
+            else
+                "${pip_cmd[@]}"
+            fi
+            ;;
+    esac
 }
 
 main() {
@@ -152,6 +222,9 @@ main() {
         LD_PROFILE LD_SHOW_AUXV LD_USE_LOAD_BIAS PYTHONSTARTUP PYTHONHOME \
         PYTHONPATH PERL5LIB RUBYLIB NODE_OPTIONS 2>/dev/null || true
 
+    detect_package_manager
+    log INFO "Using package manager: ${PKG_MANAGER}"
+
     local offline=0 info_only=0 arg
     for arg in "$@"; do
         case "$arg" in
@@ -163,19 +236,19 @@ main() {
     if (( info_only )); then
         local info_python
         if ! info_python="$(choose_python)"; then
-            log ERROR "Python 3.14.7+ is required for this command."
+            log ERROR "Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}+ is required for this command."
             exit 1
         fi
         launch_python "$info_python" "$@"
     fi
 
-    local -a sudo_cmd=()
+    sudo_cmd=()
     if (( EUID != 0 )); then
         sudo_cmd=(sudo)
     fi
 
     local -a bootstrap_pkgs=()
-    mapfile -t bootstrap_pkgs < <(bootstrap_packages)
+    mapfile -t bootstrap_pkgs < <(bootstrap_packages "$PKG_MANAGER")
 
     local -a missing_pkgs=()
     local pkg
@@ -206,13 +279,8 @@ main() {
             fi
         fi
 
-        if [[ -e /var/lib/pacman/db.lck ]]; then
-            log ERROR "Pacman lock exists at /var/lib/pacman/db.lck. Resolve it before retrying."
-            exit 1
-        fi
-
         log RUN "Installing missing packages: ${missing_pkgs[*]}"
-        "${sudo_cmd[@]}" pacman -Syu --needed --noconfirm "${missing_pkgs[@]}"
+        install_missing_packages "${missing_pkgs[@]}"
 
         log SUCCESS "All dependencies satisfied."
     else
@@ -221,7 +289,7 @@ main() {
 
     local PYTHON_BIN
     if ! PYTHON_BIN="$(choose_python)"; then
-        log ERROR "Python 3.14.7+ interpreter not found after dependency bootstrap."
+        log ERROR "Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}+ interpreter not found after dependency bootstrap."
         exit 1
     fi
 
@@ -235,7 +303,7 @@ main() {
             sudo -v
         fi
         require_internet
-        "${sudo_cmd[@]}" pacman -Syu --noconfirm python-textual python-rich
+        install_python_runtime_deps "$PYTHON_BIN"
         if ! "$PYTHON_BIN" -c 'import textual, rich, tomllib; from importlib.metadata import version; import re, sys; sys.exit(tuple(map(int, re.findall(r"\d+", version("textual"))[:3])) < (8, 2, 8))' >/dev/null 2>&1; then
             log ERROR "Python dependencies are still unusable."
             exit 1

@@ -855,8 +855,8 @@ def restore_system() -> None:
 
 # --- Entrypoint & Argument Handling ---
 def main() -> None:
-    if sys.version_info < (3, 14):
-        die(f"Python 3.14+ required, running {sys.version.split()[0]}")
+    if sys.version_info < (3, 12):
+        die(f"Python 3.12+ required, running {sys.version.split()[0]}")
 
     parser = argparse.ArgumentParser(description="Lean Arch Linux MGLRU Proactive Slice Memory Skimmer & Boot Flush")
     group = parser.add_mutually_exclusive_group()

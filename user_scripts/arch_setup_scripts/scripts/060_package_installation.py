@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import sys
 
-# Runtime Python 3.14+ Gate
-if sys.version_info < (3, 14):
-    sys.stderr.write("[FATAL] Python 3.14+ is required for Dusky Package Installer.\n")
+# Runtime Python 3.12+ Gate
+if sys.version_info < (3, 12):
+    sys.stderr.write("[FATAL] Python 3.12+ is required for Dusky Package Installer.\n")
     sys.exit(1)
 
 import argparse

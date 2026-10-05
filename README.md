@@ -83,6 +83,9 @@ The setup scripts are written to auto detect your hardware and set the appropria
 
 **Best for:** Users who already have a fresh, unconfigured Arch Linux installation with Hyprland, set up either via the archinstall script or through a manual install. If you have not installed yet, use the Arch ISO and ensure you select Btrfs as the filesystem and Hyprland as the window manager.
 
+> [!Note]
+> Ubuntu support is now available for the bootstrap wrapper (`orchestrator.sh`) with `apt`, but most setup scripts are still Arch-focused.
+
 after installing arch, boot into the os and then run this in the terminal. 
 
 
@@ -100,6 +103,11 @@ make sure your connected to the internet and git is installed,
 
 ```
 sudo pacman -Syu --needed git
+```
+
+Ubuntu:
+```bash
+sudo apt update && sudo apt install -y git
 ```
 
 
@@ -317,4 +325,3 @@ sddm is a modified version of the SilentSDDM project by @uiriansan (this is a gr
 [SilentSDDM by uiriansan][repo_linkk]
 
 [repo_linkk]: https://github.com/uiriansan/SilentSDDM/
-

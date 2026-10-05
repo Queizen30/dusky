@@ -4,12 +4,14 @@
 # ==============================================================================
 # DUSKY ARCH LINUX MASTER ORCHESTRATOR
 # ==============================================================================
-# Target: Arch Linux bleeding edge | Python 3.14.7+ | Textual 8.2.8+ | systemd 262+
+# Target: Arch Linux / Ubuntu | Python 3.12+ | Textual 8.2.8+ | systemd 262+
 # ==============================================================================
 import sys
 
-if sys.version_info < (3, 14, 7):
-    sys.stderr.write("[FATAL] Python 3.14.7+ is required.\n")
+MIN_PYTHON = (3, 12)
+
+if sys.version_info < MIN_PYTHON:
+    sys.stderr.write("[FATAL] Python 3.12+ is required.\n")
     sys.exit(1)
 
 import argparse
@@ -133,7 +135,7 @@ try:
     from textual.widgets.tree import TreeNode
 except ImportError as exc:
     sys.stderr.write(f"[FATAL] Missing Python dependencies: {exc}\n")
-    sys.stderr.write("Install: python-textual python-rich\n")
+    sys.stderr.write("Install Python deps: python3-rich + pip install textual>=8.2.8 rich\n")
     sys.exit(8)
 
 SCRIPT_DIR: Path = Path(__file__).resolve().parent
@@ -274,8 +276,8 @@ def version_tuple(value: str) -> tuple[int, ...]:
 
 
 def check_runtime_versions() -> None:
-    if sys.version_info < (3, 14, 7):
-        sys.stderr.write("[FATAL] Python 3.14.7+ is required.\n")
+    if sys.version_info < MIN_PYTHON:
+        sys.stderr.write("[FATAL] Python 3.12+ is required.\n")
         sys.exit(1)
 
     try:
